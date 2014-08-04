@@ -17,7 +17,7 @@ type SSEvent struct {
 	Data []byte
 }
 
-func OpenSSEUrl(url string) (events chan SSEvent, err error) {
+func OpenSSEUrl(url string) (<-chan SSEvent, error) {
 	tr := &http.Transport{
 		DisableCompression: true,
 	}
@@ -26,6 +26,7 @@ func OpenSSEUrl(url string) (events chan SSEvent, err error) {
 	if err != nil {
 		return nil, err
 	}
+	dbg("OpenURL resp: %+v", resp)
 
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("Error: resp.StatusCode == %d\n", resp.StatusCode)
@@ -35,29 +36,24 @@ func OpenSSEUrl(url string) (events chan SSEvent, err error) {
 		return nil, fmt.Errorf("Error: invalid Content-Type == %s\n", resp.Header.Get("Content-Type"))
 	}
 
-	dbg("Response: %+v", resp)
+	events := make(chan SSEvent)
 
-	events = make(chan SSEvent)
 	var buf bytes.Buffer
 
 	go func() {
 		ev := SSEvent{}
+		scanner := bufio.NewScanner(resp.Body)
 
-		buffed := bufio.NewReader(resp.Body)
-		for {
-			line, err := buffed.ReadBytes('\n')
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error during resp.Body read:%s\n", err)
-				close(events)
-			}
-			// dbg("NewLine: %s", string(line))
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			dbg("newLine: %s", string(line))
 
 			switch {
 
 			// start of event
 			case bytes.HasPrefix(line, []byte("id:")):
 				ev.Id = string(line[3:])
-				dbg("eventID:", ev.Id)
+				dbg("id: %s", ev.Id)
 
 			// event data
 			case bytes.HasPrefix(line, []byte("data:")):
@@ -65,7 +61,7 @@ func OpenSSEUrl(url string) (events chan SSEvent, err error) {
 				dbg("data: %s", string(line[5:]))
 
 			// end of event
-			case len(line) == 1:
+			case len(line) == 0:
 				ev.Data = buf.Bytes()
 				buf.Reset()
 				events <- ev
@@ -77,6 +73,12 @@ func OpenSSEUrl(url string) (events chan SSEvent, err error) {
 				close(events)
 
 			}
+		}
+
+		if err = scanner.Err(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error during resp.Body read:%s\n", err)
+			close(events)
+
 		}
 	}()
 
