@@ -18,11 +18,7 @@ type SSEvent struct {
 }
 
 func OpenSSEUrl(url string) (<-chan SSEvent, error) {
-	tr := &http.Transport{
-		DisableCompression: true,
-	}
-	client := &http.Client{Transport: tr}
-	resp, err := client.Get(url)
+	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
 	}
